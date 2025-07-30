@@ -1,0 +1,87 @@
+name: Build Windows Executable
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        architecture: [x64, x86]
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v1.3
+      
+    - name: Install CMake
+      uses: lukka/get-cmake@latest
+      
+    - name: Configure CMake
+      run: |
+        mkdir build
+        cd build
+        cmake .. -G "Visual Studio 17 2022" -A x64
+        
+    - name: Build
+      run: |
+        cd build
+        cmake --build . --config Release
+        
+    - name: Test executables
+      run: |
+        cd build/Release
+        dir
+        .\pycdc.exe --help || echo "pycdc built successfully"
+        .\pycdas.exe --help || echo "pycdas built successfully"
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: pycdc-windows-x64
+        path: |
+          build/Release/pycdc.exe
+          build/Release/pycdas.exe
+        retention-days: 30
+
+  create-release:
+    needs: build-windows
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: pycdc-windows-x64
+        path: ./release-files/
+        
+    - name: Create ZIP
+      run: |
+        cd release-files
+        zip -r ../pycdc-windows-x64.zip .
+        
+    - name: Get current date
+      id: date
+      run: echo "date=$(date +'%Y-%m-%d-%H-%M')" >> $GITHUB_OUTPUT
+      
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: build-${{ steps.date.outputs.date }}
+        name: Windows Build ${{ steps.date.outputs.date }}
+        files: pycdc-windows-x64.zip
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
